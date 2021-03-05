@@ -11,14 +11,14 @@ from torch.distributions import Normal
 mpl.use('Agg') 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-lr = 1e-4
+lr = 3e-4
 
 data = np.load("Hopper_data.npz")
 numdata = data['state'].shape[0]
 state_dim=data['state'].shape[1]
 action_dim=data['action'].shape[1]
-train_steps = 2000
-num_layers = 1
+train_steps = 3000
+num_layers = 2
 epsilon = 1e-6
 
 
@@ -165,7 +165,7 @@ def td_loss(memory, critic, critic_target, batch_size=256, gamma=0.99):
     with torch.no_grad():
         _, n_a_log_prob, n_action = policy.sample(next_states)#expectation is used
         n_qf = critic_target(next_states, n_action)
-        n_qvalue = rewards + gamma * masks * n_qf
+        n_qvalue = rewards / 1000.  + gamma * masks * n_qf
 
     qf = critic(states, actions)
     qf_loss = F.mse_loss(qf, n_qvalue)
@@ -201,10 +201,32 @@ for t in range(train_steps):
     softloss.append(float(loss.cpu().data.numpy()))
     soft_update(targetQ, Q, 0.005)
 
+#minimizing TDloss with soft target update
+Q = QNet(state_dim, action_dim, num_layers).to(device)
+targetQ = copy.deepcopy(Q)
+hardloss = []
+h_trueloss = []
+optimizer = torch.optim.Adam(Q.parameters(), lr=lr)
+for t in range(train_steps):
+    optimizer.zero_grad()
+    loss = td_loss(memory, Q, targetQ)
+    loss.backward()
+    optimizer.step()
+    
+    
+    trueloss = td_loss(memory, Q, Q)
+    h_trueloss.append(float(trueloss.cpu().data.numpy()))
+    hardloss.append(float(loss.cpu().data.numpy()))
+    if t % 100 == 0:
+        hard_update(targetQ, Q)
+        
 line_sgd, =plt.plot(list(range(len(sgdloss))), np.log(sgdloss),  color='red', label="SGD")
 line_soft, =plt.plot(list(range(len(softloss))), np.log(softloss), '--', color='yellow', label="soft")
 line_soft, =plt.plot(list(range(len(softloss))), np.log(s_trueloss),  color='black', label="soft true")
+
+line_hard, =plt.plot(list(range(len(hardloss))), np.log(hardloss), '--', label="hard")
+line_hard_true, =plt.plot(list(range(len(hardloss))), np.log(h_trueloss), label="hard true")
 plt.ylabel("log 10")
 plt.legend()
 
-plt.savefig("linear.jpg")
+plt.savefig("mlp2.jpg")
